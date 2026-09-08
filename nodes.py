@@ -16,10 +16,32 @@ from __future__ import annotations
 import json
 import os
 
+from .mcp import ensure_session, run_macro
 from .proxy import ENV_VARS, run_blender_script
 
 _PACK_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.join(_PACK_DIR, "scripts")
+_MACROS_DIR = os.path.join(_PACK_DIR, "macros")
+
+
+def _macro_names() -> list[str]:
+    try:
+        return sorted(f[:-3] for f in os.listdir(_MACROS_DIR)
+                      if f.endswith(".py") and not f.startswith("_"))
+    except OSError:
+        return []
+
+
+def _macro_source(name: str) -> str:
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise ValueError("MeliteBlenderMCPCall: bad macro name %r" % (name,))
+    path = os.path.join(_MACROS_DIR, name + ".py")
+    if not os.path.isfile(path):
+        raise ValueError(
+            "MeliteBlenderMCPCall: unknown macro %r — shipped: %s"
+            % (name, ", ".join(_macro_names())))
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
 
 
 class MeliteBlenderRunScript:
@@ -150,12 +172,96 @@ class MeliteBlenderExport:
         return {"result": (out_path,)}
 
 
+class MeliteBlenderMCPCall:
+    """Run a NAMED macro in a PERSISTENT Blender session (MCP wire).
+
+    One wire, two boot shapes (the card cannot tell them apart):
+    the operator's interactive Blender + MCP add-on (HUMAN-SYNCED —
+    live viewport while the graph drives the scene), or headless
+    `blender -b --python mcp_listener_headless.py` (AI-DRIVEN).
+    Macros are pack-shipped bpy payloads taking JSON args — the
+    caller gets PARAMETERS, never arbitrary code (the raw-code
+    escape hatch is MeliteBlenderRunScript, operator-scoped)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "macro": (_macro_names() or ["place_garment"],
+                          {"default": "place_garment",
+                           "tooltip": "Pack-shipped macro (macros/ dir)."}),
+                "args": (
+                    "STRING",
+                    {
+                        "default": "{}",
+                        "multiline": True,
+                        "tooltip": "JSON object of macro args (see the "
+                                   "macro's docstring contract).",
+                    },
+                ),
+                "timeout": (
+                    "INT",
+                    {
+                        "default": 300, "min": 10, "max": 3600, "step": 10,
+                        "tooltip": "Seconds for the session to answer.",
+                    },
+                ),
+            },
+            "optional": {
+                "mcp_addr": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "host:port override (env "
+                                   "MELITE_BLENDER_MCP_ADDR, else "
+                                   "127.0.0.1:9876).",
+                    },
+                ),
+                "autoboot": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Boot a headless session when none is "
+                                   "listening (the node owns the Blender "
+                                   "process). False = human-synced session "
+                                   "only, refuse if absent.",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("result_json",)
+    FUNCTION = "call"
+    CATEGORY = "Melite/Blender"
+    OUTPUT_NODE = True
+
+    def call(self, macro, args, timeout, mcp_addr="", autoboot=True):
+        try:
+            payload = json.loads(args) if args.strip() else {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "MeliteBlenderMCPCall: args is not a JSON object: %s"
+                % (exc,)) from exc
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "MeliteBlenderMCPCall: args must be a JSON object, got %s"
+                % (type(payload).__name__,))
+        ensure_session(str(mcp_addr or ""), bool(autoboot))
+        result = run_macro(str(macro), _macro_source(str(macro)), payload,
+                           knob_addr=str(mcp_addr or ""),
+                           timeout=float(timeout))
+        return (json.dumps(result)[:4000],)
+
+
 NODE_CLASS_MAPPINGS = {
     "MeliteBlenderRunScript": MeliteBlenderRunScript,
     "MeliteBlenderExport": MeliteBlenderExport,
+    "MeliteBlenderMCPCall": MeliteBlenderMCPCall,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MeliteBlenderRunScript": "Melite Blender Run Script",
     "MeliteBlenderExport": "Melite Blender Export (FBX/GLB)",
+    "MeliteBlenderMCPCall": "Melite Blender MCP Call (session macro)",
 }
