@@ -254,14 +254,136 @@ class MeliteBlenderMCPCall:
         return (json.dumps(result)[:4000],)
 
 
+class MeliteBlenderRenderShot:
+    """Render the session scene to an IMAGE (the observe arm).
+
+    The agentic loop's eyes: act-macros/nodes mutate the Blender
+    session, THIS node photographs it — the IMAGE rides SaveImage
+    into the run's artifacts (the gallery, the agent's eyes), and the
+    loop decides the next act off pixels, not log text. The shot lands
+    under ComfyUI's output/blender_proxy/<tag>.png (deterministic per
+    run tag — the loop finds it by name), rendered by the pack-shipped
+    render_shot macro in the PERSISTENT session (no cold boot per
+    shot; a cold `blender -b` costs ~15s every iteration).
+
+    Scene shape: a mesh path IMPORTS fresh (known state); empty keeps
+    the CURRENT session scene (the iterative case — photograph what
+    the acts just changed).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "scene": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "Mesh to photograph (GLB/GLTF/FBX/OBJ); "
+                                   "empty = keep the current session scene.",
+                    },
+                ),
+                "tag": (
+                    "STRING",
+                    {
+                        "default": "shot",
+                        "tooltip": "Shot basename under output/blender_proxy "
+                                   "(the card stamps the run id here).",
+                    },
+                ),
+                "width": (
+                    "INT",
+                    {
+                        "default": 768, "min": 256, "max": 1536, "step": 64,
+                        "tooltip": "Render width px.",
+                    },
+                ),
+                "height": (
+                    "INT",
+                    {
+                        "default": 768, "min": 256, "max": 1536, "step": 64,
+                        "tooltip": "Render height px.",
+                    },
+                ),
+                "timeout": (
+                    "INT",
+                    {
+                        "default": 300, "min": 10, "max": 3600, "step": 10,
+                        "tooltip": "Seconds for the session to answer.",
+                    },
+                ),
+            },
+            "optional": {
+                "mcp_addr": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "host:port override (env "
+                                   "MELITE_BLENDER_MCP_ADDR, else "
+                                   "127.0.0.1:9876).",
+                    },
+                ),
+                "autoboot": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "Boot a headless session when none is "
+                                   "listening (the node owns the Blender "
+                                   "process).",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("shot",)
+    FUNCTION = "render"
+    CATEGORY = "Melite/Blender"
+
+    def render(self, scene, tag, width, height, timeout,
+               mcp_addr="", autoboot=True):
+        import folder_paths  # ComfyUI core
+        import torch
+        from PIL import Image
+        import numpy as np
+        scene = str(scene or "")
+        if scene and not os.path.isfile(scene):
+            raise FileNotFoundError(
+                "MeliteBlenderRenderShot: scene not found: %s" % (scene,))
+        base = "".join(c if (c.isalnum() or c in ("-", "_")) else "_"
+                       for c in str(tag or "shot")) or "shot"
+        out_dir = os.path.join(folder_paths.get_output_directory(),
+                               "blender_proxy")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, base + ".png")
+        ensure_session(str(mcp_addr or ""), bool(autoboot))
+        result = run_macro("render_shot", _macro_source("render_shot"),
+                           {"scene": scene, "out": out_path,
+                            "width": int(width), "height": int(height)},
+                           knob_addr=str(mcp_addr or ""),
+                           timeout=float(timeout))
+        # run_macro returns the MELITE_RESULT dict itself (mcp.py —
+        # the listener envelope is already unwrapped there).
+        shot = (result or {}).get("shot", "")
+        if not shot or not os.path.isfile(shot):
+            raise RuntimeError(
+                "MeliteBlenderRenderShot: the session rendered nothing "
+                "(macro result: %s)" % (json.dumps(result)[:500],))
+        img = Image.open(shot).convert("RGB")
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        return (torch.from_numpy(arr)[None,],)
+
+
 NODE_CLASS_MAPPINGS = {
     "MeliteBlenderRunScript": MeliteBlenderRunScript,
     "MeliteBlenderExport": MeliteBlenderExport,
     "MeliteBlenderMCPCall": MeliteBlenderMCPCall,
+    "MeliteBlenderRenderShot": MeliteBlenderRenderShot,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MeliteBlenderRunScript": "Melite Blender Run Script",
     "MeliteBlenderExport": "Melite Blender Export (FBX/GLB)",
     "MeliteBlenderMCPCall": "Melite Blender MCP Call (session macro)",
+    "MeliteBlenderRenderShot": "Melite Blender Render Shot (observe arm)",
 }
