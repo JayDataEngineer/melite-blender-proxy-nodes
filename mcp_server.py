@@ -174,7 +174,14 @@ def _tool_call(name: str, args: dict) -> dict:
             code = args.get("code")
             if not isinstance(code, str) or not code.strip():
                 raise ValueError("execute_code requires non-empty 'code'")
-            payload = _exec_mELITE(code)
+            # THE SHARED EXEC ENGINE (found by the 3D lane's first live
+            # commission, 2026-09-26): this call site still carried the
+            # pre-rename name `_exec_mELITE`, so EVERY execute_code
+            # died with `NameError: name '_exec_mELITE' is not
+            # defined` — the door the maker reached for to verify a
+            # commissioned mesh was dead, and the failure looked like
+            # the harness's fault, not a stale rename's.
+            payload = _exec_engine(code)
             return {"content": [{"type": "text", "text": json.dumps(payload)}]}
         if name == "run_macro":
             payload = _run_macro(args.get("macro"), args.get("args") or {})
