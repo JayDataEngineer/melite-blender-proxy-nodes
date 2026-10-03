@@ -11,8 +11,10 @@ HOST REQUIREMENT resolved as:
 
 Unresolvable = loud RuntimeError naming the env vars and the binary.
 The contract mirrors melite-autorig-nodes' _resolve_blender_binary so
-the estate compose gate (SYSTEM_BINARY_REQUIRES) and the node name the
-same need, one queue slot apart.
+both packs name the same need, one queue slot apart. No compose-time
+gate checks this: the resolver raising here IS the enforcement (the
+python card_requires.py gate died with the Python estate, 2026-10-03
+audit step 8).
 """
 
 from __future__ import annotations

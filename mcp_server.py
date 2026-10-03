@@ -71,13 +71,15 @@ def _error(req_id, code: int, message: str) -> None:
 # ── the shared exec engine (the listener's law, one implementation) ──
 
 def _exec_engine(code: str) -> dict:
-    """Run pack-trusted python under the macro contract: a final
+    """Run python under the macro contract: a final
     print("MELITE_RESULT " + json) line carries the result; stdout
     tail rides along for diagnosis. Refusals raise (the caller
-    shapes them into isError)."""
+    shapes them into isError). The source is caller-supplied for
+    execute_code and pack-shipped for run_macro — this engine trusts
+    its caller by contract, it never filters."""
     out = io.StringIO()
     with redirect_stdout(out), redirect_stderr(out):
-        exec(compile(code, "<melite-macro>", "exec"), _EXEC_NS)  # noqa: S102 - pack-shipped payloads, never caller-raw
+        exec(compile(code, "<melite-macro>", "exec"), _EXEC_NS)  # noqa: S102
     text = out.getvalue()
     melite = None
     for line in reversed(text.splitlines()):
