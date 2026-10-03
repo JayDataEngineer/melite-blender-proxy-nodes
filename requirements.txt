@@ -1,0 +1,3 @@
+# melite-blender-proxy-nodes — no additional Python packages
+# beyond the engine base env. All bpy/mathutils code executes
+# inside the operator's Blender subprocess, never in ComfyUI.
